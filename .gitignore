@@ -4,6 +4,8 @@ __pycache__/
 *.png
 *.egg-info/
 dist/
+docs/
 build/
 .venv/
 .pytest_cache/
+/*.md

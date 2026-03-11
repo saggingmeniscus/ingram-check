@@ -19,28 +19,34 @@ class PDFXCheck(BaseCheck):
             root = pdf.Root
 
             if "/OutputIntents" not in root:
-                return [CheckResult(
-                    check_name=self.name,
-                    status=CheckStatus.WARN,
-                    message="No OutputIntents found — not PDF/X compliant",
-                    severity=Severity.INFO,
-                )]
+                return [
+                    CheckResult(
+                        check_name=self.name,
+                        status=CheckStatus.WARN,
+                        message="No OutputIntents found — not PDF/X compliant",
+                        severity=Severity.INFO,
+                    )
+                ]
 
             intents = root["/OutputIntents"]
             for intent in intents:
                 subtype = str(intent.get("/S", ""))
                 output_condition = str(intent.get("/OutputConditionIdentifier", ""))
                 if "GTS_PDFX" in subtype:
-                    return [CheckResult(
-                        check_name=self.name,
-                        status=CheckStatus.PASS,
-                        message=f"PDF/X compliant ({output_condition})",
-                        severity=Severity.INFO,
-                    )]
+                    return [
+                        CheckResult(
+                            check_name=self.name,
+                            status=CheckStatus.PASS,
+                            message=f"PDF/X compliant ({output_condition})",
+                            severity=Severity.INFO,
+                        )
+                    ]
 
-        return [CheckResult(
-            check_name=self.name,
-            status=CheckStatus.WARN,
-            message="OutputIntents present but no PDF/X conformance found",
-            severity=Severity.INFO,
-        )]
+        return [
+            CheckResult(
+                check_name=self.name,
+                status=CheckStatus.WARN,
+                message="OutputIntents present but no PDF/X conformance found",
+                severity=Severity.INFO,
+            )
+        ]

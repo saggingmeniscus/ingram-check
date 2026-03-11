@@ -7,7 +7,6 @@ from pathlib import Path
 import pikepdf
 import pytest
 
-
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
@@ -79,9 +78,11 @@ def pdf_with_icc(tmp_path: Path) -> Path:
     _add_blank_page(pdf, width_pts, height_pts)
     page = pdf.pages[0]
     page.Resources = pikepdf.Dictionary(
-        ColorSpace=pikepdf.Dictionary({
-            "/CS1": pikepdf.Array([pikepdf.Name.ICCBased, icc_stream]),
-        }),
+        ColorSpace=pikepdf.Dictionary(
+            {
+                "/CS1": pikepdf.Array([pikepdf.Name.ICCBased, icc_stream]),
+            }
+        ),
     )
 
     # Add second page for even count

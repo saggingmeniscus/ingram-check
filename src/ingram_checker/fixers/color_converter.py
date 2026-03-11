@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..ghostscript import convert_to_cmyk, convert_to_grayscale
+from ..backend import convert_to_cmyk, convert_to_grayscale
 from ..models import BookSpec, ColorType, FixResult
 from .base import BaseFixer
 

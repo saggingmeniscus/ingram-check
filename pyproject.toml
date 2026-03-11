@@ -2,6 +2,7 @@
 name = "ingram-checker"
 version = "0.1.0"
 description = "Ingram Lightning Source PDF compliance checker and fixer"
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     "pikepdf>=9.0.0",
@@ -28,5 +29,14 @@ pythonpath = ["src"]
 
 [dependency-groups]
 dev = [
+    "pyinstaller>=6.19.0",
     "pytest>=8.0.0",
+    "ruff>=0.9.0",
 ]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 99
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]

@@ -32,6 +32,8 @@ class CropStripper(BaseFixer):
         return FixResult(
             fixer_name=self.name,
             success=len(changes) > 0,
-            message=f"Clipped {len(changes)} page(s) to TrimBox" if changes else "No TrimBox found to clip to",
+            message=f"Clipped {len(changes)} page(s) to TrimBox"
+            if changes
+            else "No TrimBox found to clip to",
             changes=changes,
         )

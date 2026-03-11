@@ -29,30 +29,36 @@ class PageCountCheck(BaseCheck):
 
     def run(self, pdf_path: Path, spec: BookSpec) -> list[CheckResult]:
         if spec.product_type != ProductType.INTERIOR:
-            return [CheckResult(
-                check_name=self.name,
-                status=CheckStatus.SKIP,
-                message="Not an interior file",
-                severity=Severity.INFO,
-            )]
+            return [
+                CheckResult(
+                    check_name=self.name,
+                    status=CheckStatus.SKIP,
+                    message="Not an interior file",
+                    severity=Severity.INFO,
+                )
+            ]
 
         count = get_page_count(pdf_path)
         if count % 2 == 0:
-            return [CheckResult(
-                check_name=self.name,
-                status=CheckStatus.PASS,
-                message=f"Page count ({count}) is even",
-                severity=Severity.ERROR,
-            )]
+            return [
+                CheckResult(
+                    check_name=self.name,
+                    status=CheckStatus.PASS,
+                    message=f"Page count ({count}) is even",
+                    severity=Severity.ERROR,
+                )
+            ]
 
-        return [CheckResult(
-            check_name=self.name,
-            status=CheckStatus.FAIL,
-            message=f"Page count ({count}) is odd — must be divisible by 2",
-            severity=Severity.ERROR,
-            fixable=True,
-            data={"page_count": count},
-        )]
+        return [
+            CheckResult(
+                check_name=self.name,
+                status=CheckStatus.FAIL,
+                message=f"Page count ({count}) is odd — must be divisible by 2",
+                severity=Severity.ERROR,
+                fixable=True,
+                data={"page_count": count},
+            )
+        ]
 
 
 class PageSizeCheck(BaseCheck):
@@ -69,10 +75,10 @@ class PageSizeCheck(BaseCheck):
 
         if spec.bleed:
             expected_w, expected_h = bleed_w, bleed_h
-            size_label = f"{bleed_w:.3f}x{bleed_h:.3f}\" (with bleed)"
+            size_label = f'{bleed_w:.3f}x{bleed_h:.3f}" (with bleed)'
         else:
             expected_w, expected_h = trim_w, trim_h
-            size_label = f"{trim_w:.3f}x{trim_h:.3f}\" (no bleed)"
+            size_label = f'{trim_w:.3f}x{trim_h:.3f}" (no bleed)'
 
         boxes = get_page_boxes(pdf_path)
 
@@ -81,11 +87,8 @@ class PageSizeCheck(BaseCheck):
         for i, box in enumerate(boxes, 1):
             w_in = box.width_in
             h_in = box.height_in
-            if (
-                abs(w_in - expected_w) > TOLERANCE
-                or abs(h_in - expected_h) > TOLERANCE
-            ):
-                actual = f"{w_in:.3f}x{h_in:.3f}\""
+            if abs(w_in - expected_w) > TOLERANCE or abs(h_in - expected_h) > TOLERANCE:
+                actual = f'{w_in:.3f}x{h_in:.3f}"'
                 size_groups[actual].append(i)
 
         if size_groups:
@@ -94,37 +97,43 @@ class PageSizeCheck(BaseCheck):
                 f"  {actual} on pages {format_page_ranges(pages)}"
                 for actual, pages in size_groups.items()
             ]
-            return [CheckResult(
-                check_name=self.name,
-                status=CheckStatus.FAIL,
-                message=f"{total} page(s) have incorrect dimensions (expected {size_label})",
-                severity=Severity.ERROR,
-                details=details,
-            )]
+            return [
+                CheckResult(
+                    check_name=self.name,
+                    status=CheckStatus.FAIL,
+                    message=f"{total} page(s) have incorrect dimensions (expected {size_label})",
+                    severity=Severity.ERROR,
+                    details=details,
+                )
+            ]
 
-        return [CheckResult(
-            check_name=self.name,
-            status=CheckStatus.PASS,
-            message=f"All pages match expected size ({size_label})",
-            severity=Severity.ERROR,
-        )]
+        return [
+            CheckResult(
+                check_name=self.name,
+                status=CheckStatus.PASS,
+                message=f"All pages match expected size ({size_label})",
+                severity=Severity.ERROR,
+            )
+        ]
 
 
 class BleedCheck(BaseCheck):
     name = "bleed"
-    description = "Interior must have 0.125\" bleed on trim edges"
+    description = 'Interior must have 0.125" bleed on trim edges'
 
     def run(self, pdf_path: Path, spec: BookSpec) -> list[CheckResult]:
         if spec.product_type != ProductType.INTERIOR:
             return []
 
         if not spec.bleed:
-            return [CheckResult(
-                check_name=self.name,
-                status=CheckStatus.SKIP,
-                message="No bleed specified — skipping bleed check",
-                severity=Severity.INFO,
-            )]
+            return [
+                CheckResult(
+                    check_name=self.name,
+                    status=CheckStatus.SKIP,
+                    message="No bleed specified — skipping bleed check",
+                    severity=Severity.INFO,
+                )
+            ]
 
         boxes = get_page_boxes(pdf_path)
 
@@ -163,24 +172,28 @@ class BleedCheck(BaseCheck):
                 max_m = max(measurements)
                 expected = INTERIOR_BLEED_TOP_BOTTOM if edge == "top" else INTERIOR_BLEED_TRIM_EDGE
                 if abs(min_m - max_m) < 0.001:
-                    val_str = f"{min_m:.3f}\""
+                    val_str = f'{min_m:.3f}"'
                 else:
-                    val_str = f"{min_m:.3f}\"-{max_m:.3f}\""
+                    val_str = f'{min_m:.3f}"-{max_m:.3f}"'
                 details.append(
-                    f"  {edge}: {val_str} < {expected}\" on pages {format_page_ranges(pages)}"
+                    f'  {edge}: {val_str} < {expected}" on pages {format_page_ranges(pages)}'
                 )
 
-            return [CheckResult(
-                check_name=self.name,
-                status=CheckStatus.FAIL,
-                message=f"{len(all_pages)} page(s) have insufficient bleed",
-                severity=Severity.ERROR,
-                details=details,
-            )]
+            return [
+                CheckResult(
+                    check_name=self.name,
+                    status=CheckStatus.FAIL,
+                    message=f"{len(all_pages)} page(s) have insufficient bleed",
+                    severity=Severity.ERROR,
+                    details=details,
+                )
+            ]
 
-        return [CheckResult(
-            check_name=self.name,
-            status=CheckStatus.PASS,
-            message="Bleed dimensions are correct",
-            severity=Severity.ERROR,
-        )]
+        return [
+            CheckResult(
+                check_name=self.name,
+                status=CheckStatus.PASS,
+                message="Bleed dimensions are correct",
+                severity=Severity.ERROR,
+            )
+        ]

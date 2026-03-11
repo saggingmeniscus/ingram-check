@@ -97,7 +97,6 @@ def expected_interior_page_size(trim: TrimSize) -> tuple[float, float]:
     return (width, height)
 
 
-
 # Prohibited text patterns for copyright page scanning
 PROHIBITED_MANUFACTURING_PATTERNS = [
     r"printed\s+in\s+\w+",

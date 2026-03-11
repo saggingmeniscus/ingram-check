@@ -44,18 +44,22 @@ class CropMarksCheck(BaseCheck):
             doc.close()
 
         if affected_pages:
-            return [CheckResult(
-                check_name=self.name,
-                status=CheckStatus.FAIL,
-                message=f"{len(affected_pages)} page(s) have crop/registration marks",
-                severity=Severity.ERROR,
-                details=[f"  Pages {format_page_ranges(affected_pages)}"],
-                fixable=True,
-            )]
+            return [
+                CheckResult(
+                    check_name=self.name,
+                    status=CheckStatus.FAIL,
+                    message=f"{len(affected_pages)} page(s) have crop/registration marks",
+                    severity=Severity.ERROR,
+                    details=[f"  Pages {format_page_ranges(affected_pages)}"],
+                    fixable=True,
+                )
+            ]
 
-        return [CheckResult(
-            check_name=self.name,
-            status=CheckStatus.PASS,
-            message="No crop/registration marks detected",
-            severity=Severity.ERROR,
-        )]
+        return [
+            CheckResult(
+                check_name=self.name,
+                status=CheckStatus.PASS,
+                message="No crop/registration marks detected",
+                severity=Severity.ERROR,
+            )
+        ]

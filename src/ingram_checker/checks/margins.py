@@ -16,7 +16,7 @@ from .base import BaseCheck
 
 class MarginCheck(BaseCheck):
     name = "margins"
-    description = f"Content should have ≥{RECOMMENDED_MARGIN}\" margins from trim"
+    description = f'Content should have ≥{RECOMMENDED_MARGIN}" margins from trim'
 
     def run(self, pdf_path: Path, spec: BookSpec) -> list[CheckResult]:
         if spec.product_type != ProductType.INTERIOR:
@@ -75,12 +75,14 @@ class MarginCheck(BaseCheck):
             doc.close()
 
         if not edge_violations:
-            return [CheckResult(
-                check_name=self.name,
-                status=CheckStatus.PASS,
-                message=f"All pages have ≥{RECOMMENDED_MARGIN}\" margins",
-                severity=Severity.WARNING,
-            )]
+            return [
+                CheckResult(
+                    check_name=self.name,
+                    status=CheckStatus.PASS,
+                    message=f'All pages have ≥{RECOMMENDED_MARGIN}" margins',
+                    severity=Severity.WARNING,
+                )
+            ]
 
         # Count total affected pages
         all_pages: set[int] = set()
@@ -97,17 +99,17 @@ class MarginCheck(BaseCheck):
             min_m = min(measurements)
             max_m = max(measurements)
             if abs(min_m - max_m) < 0.01:
-                range_str = f"{min_m:.2f}\""
+                range_str = f'{min_m:.2f}"'
             else:
-                range_str = f"{min_m:.2f}\"-{max_m:.2f}\""
-            details.append(
-                f"  {edge}: {range_str} on pages {format_page_ranges(pages)}"
-            )
+                range_str = f'{min_m:.2f}"-{max_m:.2f}"'
+            details.append(f"  {edge}: {range_str} on pages {format_page_ranges(pages)}")
 
-        return [CheckResult(
-            check_name=self.name,
-            status=CheckStatus.WARN,
-            message=f"{len(all_pages)} page(s) have margins <{RECOMMENDED_MARGIN}\"",
-            severity=Severity.WARNING,
-            details=details,
-        )]
+        return [
+            CheckResult(
+                check_name=self.name,
+                status=CheckStatus.WARN,
+                message=f'{len(all_pages)} page(s) have margins <{RECOMMENDED_MARGIN}"',
+                severity=Severity.WARNING,
+                details=details,
+            )
+        ]

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from ingram_checker.checks.page_size import BleedCheck, PageCountCheck, PageSizeCheck
+from ingram_checker.checks.page_size import PageCountCheck, PageSizeCheck
 from ingram_checker.models import (
     BookSpec,
     CheckStatus,

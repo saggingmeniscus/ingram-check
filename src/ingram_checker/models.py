@@ -40,6 +40,7 @@ class ProductType(Enum):
 @dataclass
 class TrimSize:
     """A standard trim size in inches."""
+
     width: float
     height: float
     name: str = ""
@@ -51,6 +52,7 @@ class TrimSize:
 @dataclass
 class CheckResult:
     """Result of a single compliance check."""
+
     check_name: str
     status: CheckStatus
     message: str
@@ -67,6 +69,7 @@ class CheckResult:
 @dataclass
 class BookSpec:
     """Specification for the book being checked."""
+
     product_type: ProductType
     trim_size: TrimSize
     color_type: ColorType = ColorType.BW
@@ -78,6 +81,7 @@ class BookSpec:
 @dataclass
 class FixResult:
     """Result of an auto-fix operation."""
+
     fixer_name: str
     success: bool
     message: str

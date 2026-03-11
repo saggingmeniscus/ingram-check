@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -12,6 +12,7 @@ import pikepdf
 @dataclass
 class PageBoxes:
     """Page box dimensions in points (1 point = 1/72 inch)."""
+
     media_box: tuple[float, float, float, float]  # x0, y0, x1, y1
     trim_box: tuple[float, float, float, float] | None = None
     bleed_box: tuple[float, float, float, float] | None = None
@@ -37,6 +38,7 @@ class PageBoxes:
 @dataclass
 class FontInfo:
     """Information about a font used in the PDF."""
+
     name: str
     embedded: bool
     subset: bool = False
@@ -46,6 +48,7 @@ class FontInfo:
 @dataclass
 class ImageInfo:
     """Information about an image in the PDF."""
+
     page: int
     width_px: int
     height_px: int
@@ -60,6 +63,7 @@ class ImageInfo:
 @dataclass
 class ColorSpaceInfo:
     """Information about a color space found in the PDF."""
+
     name: str
     cs_type: str  # DeviceRGB, DeviceCMYK, DeviceGray, ICCBased, Separation, DeviceN
     page: int = 0
@@ -79,12 +83,14 @@ def get_page_boxes(pdf_path: str | Path) -> list[PageBoxes]:
             trim = _box_to_tuple(page.TrimBox) if "/TrimBox" in page else None
             bleed = _box_to_tuple(page.BleedBox) if "/BleedBox" in page else None
             crop = _box_to_tuple(page.CropBox) if "/CropBox" in page else None
-            results.append(PageBoxes(
-                media_box=media,
-                trim_box=trim,
-                bleed_box=bleed,
-                crop_box=crop,
-            ))
+            results.append(
+                PageBoxes(
+                    media_box=media,
+                    trim_box=trim,
+                    bleed_box=bleed,
+                    crop_box=crop,
+                )
+            )
     return results
 
 
@@ -109,9 +115,7 @@ def get_fonts(pdf_path: str | Path) -> list[FontInfo]:
     return fonts
 
 
-def _extract_fonts_from_resources(
-    page: pikepdf.Page, page_num: int
-) -> list[FontInfo]:
+def _extract_fonts_from_resources(page: pikepdf.Page, page_num: int) -> list[FontInfo]:
     """Extract fonts from a page's resource dictionary."""
     fonts = []
     resources = page.get("/Resources")
@@ -138,10 +142,7 @@ def _extract_fonts_from_resources(
             embedded = False
             desc = font_obj.get("/FontDescriptor")
             if desc is not None:
-                embedded = any(
-                    key in desc
-                    for key in ("/FontFile", "/FontFile2", "/FontFile3")
-                )
+                embedded = any(key in desc for key in ("/FontFile", "/FontFile2", "/FontFile3"))
 
             # Type 0 (CID) fonts: check descendant
             if str(font_obj.get("/Subtype", "")) == "/Type0":
@@ -151,16 +152,17 @@ def _extract_fonts_from_resources(
                     desc2 = desc_font.get("/FontDescriptor")
                     if desc2 is not None:
                         embedded = any(
-                            key in desc2
-                            for key in ("/FontFile", "/FontFile2", "/FontFile3")
+                            key in desc2 for key in ("/FontFile", "/FontFile2", "/FontFile3")
                         )
 
-            fonts.append(FontInfo(
-                name=base_name,
-                embedded=embedded,
-                subset=subset,
-                page=page_num,
-            ))
+            fonts.append(
+                FontInfo(
+                    name=base_name,
+                    embedded=embedded,
+                    subset=subset,
+                    page=page_num,
+                )
+            )
         except Exception:
             continue
     return fonts
@@ -176,17 +178,18 @@ def get_color_spaces(pdf_path: str | Path) -> list[ColorSpaceInfo]:
         root = pdf.Root
         if "/OutputIntents" in root:
             for intent in root["/OutputIntents"]:
-                subtype = str(intent.get("/S", ""))
                 if "/ICCBased" in str(intent) or "/DestOutputProfile" in intent:
-                    key = f"OutputIntent:ICCBased:0"
+                    key = "OutputIntent:ICCBased:0"
                     if key not in seen:
                         seen.add(key)
-                        results.append(ColorSpaceInfo(
-                            name="OutputIntent",
-                            cs_type="ICCBased",
-                            page=0,
-                            context="document",
-                        ))
+                        results.append(
+                            ColorSpaceInfo(
+                                name="OutputIntent",
+                                cs_type="ICCBased",
+                                page=0,
+                                context="document",
+                            )
+                        )
 
         for page_num, page in enumerate(pdf.pages, 1):
             _extract_color_spaces_from_page(page, page_num, results, seen)
@@ -245,12 +248,14 @@ def _extract_color_spaces_from_page(
             key = f"{cs_name}:{cs_type}:{page_num}"
             if key not in seen:
                 seen.add(key)
-                results.append(ColorSpaceInfo(
-                    name=str(cs_name)[1:] if str(cs_name).startswith("/") else str(cs_name),
-                    cs_type=cs_type,
-                    page=page_num,
-                    context="resource",
-                ))
+                results.append(
+                    ColorSpaceInfo(
+                        name=str(cs_name)[1:] if str(cs_name).startswith("/") else str(cs_name),
+                        cs_type=cs_type,
+                        page=page_num,
+                        context="resource",
+                    )
+                )
 
     # Check XObject (images) for their color spaces
     xobjects = resources.get("/XObject")
@@ -265,12 +270,16 @@ def _extract_color_spaces_from_page(
                         key = f"image:{cs_type}:{page_num}"
                         if key not in seen:
                             seen.add(key)
-                            results.append(ColorSpaceInfo(
-                                name=str(xo_name)[1:] if str(xo_name).startswith("/") else str(xo_name),
-                                cs_type=cs_type,
-                                page=page_num,
-                                context="image",
-                            ))
+                            results.append(
+                                ColorSpaceInfo(
+                                    name=str(xo_name)[1:]
+                                    if str(xo_name).startswith("/")
+                                    else str(xo_name),
+                                    cs_type=cs_type,
+                                    page=page_num,
+                                    context="image",
+                                )
+                            )
             except Exception:
                 continue
 
@@ -314,16 +323,18 @@ def get_images(pdf_path: str | Path) -> list[ImageInfo]:
                             cs_map = {1: "DeviceGray", 3: "DeviceRGB", 4: "DeviceCMYK"}
                             cs_name = cs_map.get(cs_name, f"Unknown({cs_name})")
 
-                        results.append(ImageInfo(
-                            page=page_num + 1,
-                            width_px=pix_width,
-                            height_px=pix_height,
-                            effective_dpi_x=dpi_x,
-                            effective_dpi_y=dpi_y,
-                            color_space=cs_name,
-                            bits_per_component=bpc,
-                            position=(rect.x0, rect.y0, rect.x1, rect.y1),
-                        ))
+                        results.append(
+                            ImageInfo(
+                                page=page_num + 1,
+                                width_px=pix_width,
+                                height_px=pix_height,
+                                effective_dpi_x=dpi_x,
+                                effective_dpi_y=dpi_y,
+                                color_space=cs_name,
+                                bits_per_component=bpc,
+                                position=(rect.x0, rect.y0, rect.x1, rect.y1),
+                            )
+                        )
                 except Exception:
                     continue
     finally:
@@ -349,6 +360,7 @@ def get_text(pdf_path: str | Path, page_numbers: list[int] | None = None) -> dic
 @dataclass
 class CoverTemplateGeometry:
     """Geometry extracted from Ingram cover template crop marks."""
+
     # Trim rectangle in points (x0, y0, x1, y1)
     trim_rect: tuple[float, float, float, float]
     # Spine fold lines in points (left_x, right_x), or None if not detected
@@ -433,7 +445,9 @@ def get_cover_template_geometry(pdf_path: str | Path) -> CoverTemplateGeometry |
         doc.close()
 
 
-def get_content_bbox(pdf_path: str | Path, page_num: int = 0) -> tuple[float, float, float, float] | None:
+def get_content_bbox(
+    pdf_path: str | Path, page_num: int = 0
+) -> tuple[float, float, float, float] | None:
     """Get the bounding box of all visible content on a page, in points.
 
     Uses PyMuPDF to find the union of all drawings, images, and text blocks,

@@ -10,7 +10,7 @@ from ..config import (
     PROHIBITED_MANUFACTURING_PATTERNS,
     PROHIBITED_PAPER_CERT_PATTERNS,
 )
-from ..models import BookSpec, CheckResult, CheckStatus, ProductType, Severity
+from ..models import BookSpec, CheckResult, CheckStatus, Severity
 from ..pdf_info import get_text
 from .base import BaseCheck
 
@@ -29,23 +29,27 @@ class ManufacturingStatementCheck(BaseCheck):
             for pattern in PROHIBITED_MANUFACTURING_PATTERNS:
                 matches = re.findall(pattern, page_text, re.IGNORECASE)
                 for match in matches:
-                    found.append(f"  Page {page_num}: \"{match}\"")
+                    found.append(f'  Page {page_num}: "{match}"')
 
         if found:
-            return [CheckResult(
-                check_name=self.name,
-                status=CheckStatus.FAIL,
-                message=f"Found {len(found)} manufacturing statement(s)",
-                severity=Severity.ERROR,
-                details=found,
-            )]
+            return [
+                CheckResult(
+                    check_name=self.name,
+                    status=CheckStatus.FAIL,
+                    message=f"Found {len(found)} manufacturing statement(s)",
+                    severity=Severity.ERROR,
+                    details=found,
+                )
+            ]
 
-        return [CheckResult(
-            check_name=self.name,
-            status=CheckStatus.PASS,
-            message="No manufacturing statements found",
-            severity=Severity.ERROR,
-        )]
+        return [
+            CheckResult(
+                check_name=self.name,
+                status=CheckStatus.PASS,
+                message="No manufacturing statements found",
+                severity=Severity.ERROR,
+            )
+        ]
 
 
 class PaperCertificationCheck(BaseCheck):
@@ -61,23 +65,27 @@ class PaperCertificationCheck(BaseCheck):
             for pattern in PROHIBITED_PAPER_CERT_PATTERNS:
                 matches = re.findall(pattern, page_text, re.IGNORECASE)
                 for match in matches:
-                    found.append(f"  Page {page_num}: \"{match}\"")
+                    found.append(f'  Page {page_num}: "{match}"')
 
         if found:
-            return [CheckResult(
-                check_name=self.name,
-                status=CheckStatus.WARN,
-                message=f"Found {len(found)} paper certification reference(s)",
-                severity=Severity.WARNING,
-                details=found,
-            )]
+            return [
+                CheckResult(
+                    check_name=self.name,
+                    status=CheckStatus.WARN,
+                    message=f"Found {len(found)} paper certification reference(s)",
+                    severity=Severity.WARNING,
+                    details=found,
+                )
+            ]
 
-        return [CheckResult(
-            check_name=self.name,
-            status=CheckStatus.PASS,
-            message="No paper certification claims found",
-            severity=Severity.WARNING,
-        )]
+        return [
+            CheckResult(
+                check_name=self.name,
+                status=CheckStatus.PASS,
+                message="No paper certification claims found",
+                severity=Severity.WARNING,
+            )
+        ]
 
 
 class BracketedTextCheck(BaseCheck):
@@ -98,17 +106,21 @@ class BracketedTextCheck(BaseCheck):
                     found.append(f"  Page {page_num}: {match[:60]}")
 
         if found:
-            return [CheckResult(
-                check_name=self.name,
-                status=CheckStatus.WARN,
-                message=f"Found {len(found)} bracketed text item(s)",
-                severity=Severity.WARNING,
-                details=found[:20],
-            )]
+            return [
+                CheckResult(
+                    check_name=self.name,
+                    status=CheckStatus.WARN,
+                    message=f"Found {len(found)} bracketed text item(s)",
+                    severity=Severity.WARNING,
+                    details=found[:20],
+                )
+            ]
 
-        return [CheckResult(
-            check_name=self.name,
-            status=CheckStatus.PASS,
-            message="No bracketed instructions found",
-            severity=Severity.WARNING,
-        )]
+        return [
+            CheckResult(
+                check_name=self.name,
+                status=CheckStatus.PASS,
+                message="No bracketed instructions found",
+                severity=Severity.WARNING,
+            )
+        ]

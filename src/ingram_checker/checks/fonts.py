@@ -18,20 +18,22 @@ class FontEmbeddingCheck(BaseCheck):
         unembedded = [f for f in fonts if not f.embedded]
 
         if not unembedded:
-            return [CheckResult(
-                check_name=self.name,
-                status=CheckStatus.PASS,
-                message=f"All {len(fonts)} fonts are embedded",
-                severity=Severity.ERROR,
-            )]
+            return [
+                CheckResult(
+                    check_name=self.name,
+                    status=CheckStatus.PASS,
+                    message=f"All {len(fonts)} fonts are embedded",
+                    severity=Severity.ERROR,
+                )
+            ]
 
-        details = [
-            f"  {f.name} (page {f.page})" for f in unembedded
+        details = [f"  {f.name} (page {f.page})" for f in unembedded]
+        return [
+            CheckResult(
+                check_name=self.name,
+                status=CheckStatus.FAIL,
+                message=f"{len(unembedded)} font(s) not embedded",
+                severity=Severity.ERROR,
+                details=details,
+            )
         ]
-        return [CheckResult(
-            check_name=self.name,
-            status=CheckStatus.FAIL,
-            message=f"{len(unembedded)} font(s) not embedded",
-            severity=Severity.ERROR,
-            details=details,
-        )]

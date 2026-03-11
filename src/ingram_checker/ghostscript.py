@@ -8,13 +8,14 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image
 import numpy as np
+from PIL import Image
 
 
 @dataclass
 class InkCoverage:
     """Per-page ink coverage percentages."""
+
     page: int
     cyan: float
     magenta: float
@@ -29,13 +30,12 @@ class InkCoverage:
 def _find_gs() -> str:
     """Find the Ghostscript executable."""
     import shutil
+
     for name in ("gs", "gswin64c", "gswin32c"):
         path = shutil.which(name)
         if path:
             return path
-    raise FileNotFoundError(
-        "Ghostscript not found. Install it: brew install ghostscript"
-    )
+    raise FileNotFoundError("Ghostscript not found. Install it: brew install ghostscript")
 
 
 def measure_ink_coverage(pdf_path: str | Path) -> list[InkCoverage]:
@@ -43,9 +43,14 @@ def measure_ink_coverage(pdf_path: str | Path) -> list[InkCoverage]:
     gs = _find_gs()
     result = subprocess.run(
         [
-            gs, "-q", "-dBATCH", "-dNOPAUSE", "-dSAFER",
+            gs,
+            "-q",
+            "-dBATCH",
+            "-dNOPAUSE",
+            "-dSAFER",
             "-sDEVICE=inkcov",
-            "-o", "-",
+            "-o",
+            "-",
             str(pdf_path),
         ],
         capture_output=True,
@@ -58,20 +63,20 @@ def measure_ink_coverage(pdf_path: str | Path) -> list[InkCoverage]:
     coverages = []
     page_num = 0
     # Each output line: C M Y K  CMYK OK
-    pattern = re.compile(
-        r"^\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+CMYK\s+OK"
-    )
+    pattern = re.compile(r"^\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+CMYK\s+OK")
     for line in result.stdout.splitlines():
         m = pattern.match(line)
         if m:
             page_num += 1
-            coverages.append(InkCoverage(
-                page=page_num,
-                cyan=float(m.group(1)) * 100,
-                magenta=float(m.group(2)) * 100,
-                yellow=float(m.group(3)) * 100,
-                black=float(m.group(4)) * 100,
-            ))
+            coverages.append(
+                InkCoverage(
+                    page=page_num,
+                    cyan=float(m.group(1)) * 100,
+                    magenta=float(m.group(2)) * 100,
+                    yellow=float(m.group(3)) * 100,
+                    black=float(m.group(4)) * 100,
+                )
+            )
     return coverages
 
 
@@ -92,7 +97,11 @@ def measure_max_pixel_ink_density(
         output_pattern = str(Path(tmpdir) / "page_%04d.tif")
 
         cmd = [
-            gs, "-q", "-dBATCH", "-dNOPAUSE", "-dSAFER",
+            gs,
+            "-q",
+            "-dBATCH",
+            "-dNOPAUSE",
+            "-dSAFER",
             "-sDEVICE=tiff32nc",
             f"-r{resolution}",
             f"-sOutputFile={output_pattern}",
@@ -140,16 +149,20 @@ def measure_max_pixel_ink_density(
     return results
 
 
-def downsample_images(
+def resample_images(
     input_path: str | Path,
     output_path: str | Path,
     target_dpi: int = 300,
 ) -> None:
-    """Downsample images above target_dpi using Ghostscript."""
+    """Resample images to target_dpi using Ghostscript."""
     gs = _find_gs()
     result = subprocess.run(
         [
-            gs, "-q", "-dBATCH", "-dNOPAUSE", "-dSAFER",
+            gs,
+            "-q",
+            "-dBATCH",
+            "-dNOPAUSE",
+            "-dSAFER",
             "-sDEVICE=pdfwrite",
             "-dPDFSETTINGS=/prepress",
             "-dCompatibilityLevel=1.4",
@@ -170,7 +183,7 @@ def downsample_images(
         timeout=600,
     )
     if result.returncode != 0:
-        raise RuntimeError(f"Ghostscript image downsampling failed: {result.stderr}")
+        raise RuntimeError(f"Ghostscript image resampling failed: {result.stderr}")
 
 
 def convert_to_cmyk(
@@ -181,7 +194,11 @@ def convert_to_cmyk(
     gs = _find_gs()
     result = subprocess.run(
         [
-            gs, "-q", "-dBATCH", "-dNOPAUSE", "-dSAFER",
+            gs,
+            "-q",
+            "-dBATCH",
+            "-dNOPAUSE",
+            "-dSAFER",
             "-sDEVICE=pdfwrite",
             "-dPDFSETTINGS=/prepress",
             "-sColorConversionStrategy=CMYK",
@@ -205,7 +222,11 @@ def convert_to_grayscale(
     gs = _find_gs()
     result = subprocess.run(
         [
-            gs, "-q", "-dBATCH", "-dNOPAUSE", "-dSAFER",
+            gs,
+            "-q",
+            "-dBATCH",
+            "-dNOPAUSE",
+            "-dSAFER",
             "-sDEVICE=pdfwrite",
             "-dPDFSETTINGS=/prepress",
             "-sColorConversionStrategy=Gray",

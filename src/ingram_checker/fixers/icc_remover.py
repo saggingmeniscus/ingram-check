@@ -35,9 +35,21 @@ class ICCRemover(BaseFixer):
         return FixResult(
             fixer_name=self.name,
             success=len(changes) > 0,
-            message=f"Removed {len(changes)} ICC reference(s)" if changes else "No ICC profiles found",
+            message=f"Removed {len(changes)} ICC reference(s)"
+            if changes
+            else "No ICC profiles found",
             changes=changes,
         )
+
+    def _icc_to_device_colorspace(self, cs_obj: pikepdf.Array) -> pikepdf.Name:
+        """Map an ICCBased color space to the equivalent Device color space."""
+        icc_stream = cs_obj[1]
+        n = int(icc_stream.get("/N", 3))
+        if n == 1:
+            return pikepdf.Name.DeviceGray
+        if n == 4:
+            return pikepdf.Name.DeviceCMYK
+        return pikepdf.Name.DeviceRGB
 
     def _clean_page(self, page: pikepdf.Page, page_num: int) -> list[str]:
         changes: list[str] = []
@@ -56,5 +68,25 @@ class ICCRemover(BaseFixer):
             for name in to_remove:
                 del cs_dict[name]
                 changes.append(f"Page {page_num}: removed ICCBased color space {name}")
+
+        # Clean image XObjects
+        xobjects = resources.get("/XObject")
+        if xobjects is not None:
+            for xo_name, xo_ref in dict(xobjects).items():
+                try:
+                    xo = xo_ref
+                    if str(xo.get("/Subtype", "")) != "/Image":
+                        continue
+                    cs = xo.get("/ColorSpace")
+                    if isinstance(cs, pikepdf.Array) and len(cs) > 0 and str(cs[0]) == "/ICCBased":
+                        device_cs = self._icc_to_device_colorspace(cs)
+                        xo["/ColorSpace"] = device_cs
+                        clean_name = str(xo_name).lstrip("/")
+                        changes.append(
+                            f"Page {page_num}: replaced ICCBased on image"
+                            f" {clean_name} with {device_cs}"
+                        )
+                except Exception:
+                    continue
 
         return changes

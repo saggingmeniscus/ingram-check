@@ -1,0 +1,155 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 0.2.0)'
+        required: true
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  # ---------- gates ----------
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv sync --group dev
+      - run: make lint
+      - run: make format-check
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv sync --group dev
+      - run: make test
+
+  # ---------- version check ----------
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: get
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          # Verify pyproject.toml matches
+          TOML_VERSION=$(grep '^version = ' pyproject.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          if [ "$VERSION" != "$TOML_VERSION" ]; then
+            echo "::error::Tag version ($VERSION) does not match pyproject.toml ($TOML_VERSION)"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # For manual dispatch, create and push the tag
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            git tag "v${VERSION}"
+            git push origin "v${VERSION}"
+          fi
+
+  # ---------- build ----------
+  build-binary:
+    needs: [lint, test, version]
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv sync --group dev
+      - run: make build
+      - run: tar -czf ingram-check-macos-arm64.tar.gz -C dist ingram-check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-macos-arm64
+          path: ingram-check-macos-arm64.tar.gz
+
+  build-sdist:
+    needs: [lint, test, version]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: make dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-packages
+          path: dist/
+
+  # ---------- release ----------
+  release:
+    needs: [build-binary, build-sdist, version]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: binary-macos-arm64
+          path: artifacts/
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-packages
+          path: artifacts/
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.version.outputs.version }}
+          generate_release_notes: true
+          files: artifacts/*
+
+  # ---------- publish ----------
+  publish-pypi:
+    needs: [build-sdist, version]
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-packages
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # ---------- homebrew ----------
+  update-homebrew:
+    needs: [publish-pypi, version]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: saggingmeniscus/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+      - name: Update formula
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          # Download sdist and compute sha256
+          URL="https://files.pythonhosted.org/packages/source/i/ingram-checker/ingram_checker-${VERSION}.tar.gz"
+          # Wait briefly for PyPI to propagate
+          sleep 30
+          curl -sSL -o sdist.tar.gz "$URL"
+          SHA256=$(sha256sum sdist.tar.gz | awk '{print $1}')
+
+          cd homebrew-tap
+          FORMULA="Formula/ingram-check.rb"
+
+          # Update url and sha256
+          sed -i "s|url \".*\"|url \"${URL}\"|" "$FORMULA"
+          sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|" "$FORMULA"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$FORMULA"
+          git diff --cached --quiet || git commit -m "ingram-check ${VERSION}"
+          git push

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 
 from rich.console import Console
 from rich.panel import Panel
@@ -29,8 +28,14 @@ def render_terminal(
         console = Console()
 
     # Summary counts
-    errors = sum(1 for r in results if r.status == CheckStatus.FAIL and r.severity == Severity.ERROR)
-    warnings = sum(1 for r in results if r.status in (CheckStatus.FAIL, CheckStatus.WARN) and r.severity == Severity.WARNING)
+    errors = sum(
+        1 for r in results if r.status == CheckStatus.FAIL and r.severity == Severity.ERROR
+    )
+    warnings = sum(
+        1
+        for r in results
+        if r.status in (CheckStatus.FAIL, CheckStatus.WARN) and r.severity == Severity.WARNING
+    )
     passed = sum(1 for r in results if r.status == CheckStatus.PASS)
 
     # Results table
@@ -86,7 +91,9 @@ def render_terminal(
     console.print(f"[green]{passed} passed[/green]")
 
     if errors > 0:
-        console.print("[red bold]PDF is NOT compliant with Ingram Lightning Source requirements.[/red bold]")
+        console.print(
+            "[red bold]PDF is NOT compliant with Ingram Lightning Source requirements.[/red bold]"
+        )
     elif warnings > 0:
         console.print("[yellow]PDF has warnings — review before submitting.[/yellow]")
     else:
@@ -101,12 +108,18 @@ def render_json(
     data = {
         "checks": [_check_to_dict(r) for r in results],
         "summary": {
-            "errors": sum(1 for r in results if r.status == CheckStatus.FAIL and r.severity == Severity.ERROR),
-            "warnings": sum(1 for r in results if r.status in (CheckStatus.FAIL, CheckStatus.WARN) and r.severity == Severity.WARNING),
+            "errors": sum(
+                1 for r in results if r.status == CheckStatus.FAIL and r.severity == Severity.ERROR
+            ),
+            "warnings": sum(
+                1
+                for r in results
+                if r.status in (CheckStatus.FAIL, CheckStatus.WARN)
+                and r.severity == Severity.WARNING
+            ),
             "passed": sum(1 for r in results if r.status == CheckStatus.PASS),
             "compliant": all(
-                r.status != CheckStatus.FAIL or r.severity != Severity.ERROR
-                for r in results
+                r.status != CheckStatus.FAIL or r.severity != Severity.ERROR for r in results
             ),
         },
     }
