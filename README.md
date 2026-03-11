@@ -9,12 +9,27 @@ A command-line tool that checks PDF files for [Ingram Lightning Source](https://
 
 ## Installation
 
-```bash
-# Install with uv (recommended)
-uv tool install .
+### Homebrew (macOS)
 
-# Or install in a virtual environment
-uv sync
+```bash
+brew tap saggingmeniscus/tap
+brew install ingram-check
+```
+
+### PyPI
+
+```bash
+pip install ingram-checker
+# or
+uv tool install ingram-checker
+```
+
+### From source
+
+```bash
+git clone https://github.com/saggingmeniscus/ingram-check.git
+cd ingram-check
+uv tool install .
 ```
 
 After installation, the `ingram-check` command is available globally.
