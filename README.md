@@ -24,6 +24,10 @@ pip install ingram-checker
 uv tool install ingram-checker
 ```
 
+### Standalone binary (macOS Apple Silicon)
+
+Download `ingram-check-macos-arm64.tar.gz` from the [latest release](https://github.com/saggingmeniscus/ingram-check/releases/latest), extract it, and run `./ingram-check` from the extracted directory. No Python installation required.
+
 ### From source
 
 ```bash
