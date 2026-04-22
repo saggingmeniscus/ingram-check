@@ -16,6 +16,18 @@ from PIL import Image
 
 from .ghostscript import InkCoverage
 
+# Keys that describe masking/rendering and are orthogonal to color space and sampling.
+# When replacing an image XObject, these must be copied across — most importantly
+# /SMask, which carries transparency for images whose RGB plane is a solid color
+# (common for black-on-transparent logos embedded from PNG).
+_PRESERVED_IMAGE_KEYS = ("/SMask", "/Mask", "/Intent", "/Interpolate", "/Metadata")
+
+
+def _copy_preserved_image_keys(src: pikepdf.Object, dst: pikepdf.Stream) -> None:
+    for key in _PRESERVED_IMAGE_KEYS:
+        if key in src:
+            dst[key] = src[key]
+
 
 def _rgb_to_cmyk_coverage(pixels: np.ndarray) -> tuple[float, float, float, float]:
     """Convert an RGB pixel array to average CMYK percentages.
@@ -215,6 +227,7 @@ def resample_images(
                     new_stream["/BitsPerComponent"] = 8
                     new_stream["/Filter"] = pikepdf.Name.DCTDecode
                     new_stream["/ColorSpace"] = cs_name
+                    _copy_preserved_image_keys(xo, new_stream)
                     xobjects[xo_name] = new_stream
 
                 except Exception:
@@ -268,6 +281,7 @@ def _convert_image_xobject(
         new_stream["/ColorSpace"] = pikepdf.Name.DeviceGray
     elif target_mode == "CMYK":
         new_stream["/ColorSpace"] = pikepdf.Name.DeviceCMYK
+    _copy_preserved_image_keys(xo, new_stream)
     return new_stream
 
 
