@@ -29,6 +29,58 @@ def _copy_preserved_image_keys(src: pikepdf.Object, dst: pikepdf.Stream) -> None
             dst[key] = src[key]
 
 
+def _strip_jpeg_app14(data: bytes) -> bytes:
+    """Remove the Adobe APP14 marker segment from JPEG data.
+
+    Pillow's CMYK JPEG output includes an APP14 marker (transform=0) that
+    some viewers interpret as a signal to invert the sample bytes. Since we
+    take care to encode the CMYK bytes in PDF convention ourselves, the
+    marker only confuses such viewers — strip it to make the output render
+    consistently.
+    """
+    i = data.find(b"\xff\xee")
+    if i < 0:
+        return data
+    seg_len = int.from_bytes(data[i + 2 : i + 4], "big")
+    return data[:i] + data[i + 2 + seg_len :]
+
+
+def _cmyk_source_needs_preinvert(xo: pikepdf.Object) -> bool:
+    """Return True if pikepdf hands PIL CMYK values in PDF convention (0=no ink).
+
+    Pillow stores CMYK in RGB-like convention (0=full ink). When the source
+    is a CMYK JPEG (DCTDecode), libjpeg+Pillow auto-invert during read so
+    PIL ends up with values in PIL convention and a round-trip through
+    PIL's JPEG writer produces correctly-encoded PDF bytes. But when the
+    source is an Indexed palette or raw FlateDecode CMYK, pikepdf returns
+    the raw PDF-convention bytes unchanged — PIL then treats them as
+    PIL-convention and Pillow's invert-on-save lands them upside-down,
+    producing color-inverted output. For those sources we must pre-invert
+    the PIL values before passing them to the JPEG writer.
+    """
+    filt = xo.get("/Filter")
+    if filt is None:
+        return True
+    if isinstance(filt, pikepdf.Name):
+        return str(filt) != "/DCTDecode"
+    if isinstance(filt, pikepdf.Array):
+        return not any(isinstance(f, pikepdf.Name) and str(f) == "/DCTDecode" for f in filt)
+    return True
+
+
+def _save_cmyk_jpeg(pil_img: Image.Image, pre_invert: bool = False, quality: int = 95) -> bytes:
+    """Encode a CMYK PIL image as JPEG bytes safe for PDF embedding.
+
+    pre_invert: True when PIL holds PDF-convention CMYK values (from a non-DCT
+    source). See _cmyk_source_needs_preinvert for the convention details.
+    """
+    if pre_invert:
+        pil_img = Image.eval(pil_img, lambda v: 255 - v)
+    buf = io.BytesIO()
+    pil_img.save(buf, format="JPEG", quality=quality)
+    return _strip_jpeg_app14(buf.getvalue())
+
+
 def _rgb_to_cmyk_coverage(pixels: np.ndarray) -> tuple[float, float, float, float]:
     """Convert an RGB pixel array to average CMYK percentages.
 
@@ -193,33 +245,43 @@ def resample_images(
                     if dpi_info is None:
                         continue
 
-                    min_dpi = min(dpi_info)
-                    if min_dpi <= 0 or abs(min_dpi - target_dpi) < 10:
-                        continue  # close enough or invalid
+                    dpi_x, dpi_y = dpi_info
+                    if dpi_x <= 0 or dpi_y <= 0:
+                        continue
+                    # Skip only when both axes are already close enough — must
+                    # not gate on min() alone, as a non-uniformly scaled image
+                    # can have one offending axis while the other is fine.
+                    if abs(dpi_x - target_dpi) < 10 and abs(dpi_y - target_dpi) < 10:
+                        continue
 
-                    scale = target_dpi / min_dpi
-                    new_width = max(1, round(width * scale))
-                    new_height = max(1, round(height * scale))
+                    # Per-axis target: matching the displayed size at target_dpi.
+                    # Avoids bloating the over-resolution axis of a stretched image.
+                    new_width = max(1, round(width * target_dpi / dpi_x))
+                    new_height = max(1, round(height * target_dpi / dpi_y))
 
                     pil_img = pikepdf.PdfImage(xo).as_pil_image()
                     pil_img = pil_img.resize((new_width, new_height), Image.LANCZOS)
 
-                    buf = io.BytesIO()
                     if pil_img.mode == "CMYK":
-                        pil_img.save(buf, format="JPEG", quality=95)
+                        jpeg_bytes = _save_cmyk_jpeg(
+                            pil_img, pre_invert=_cmyk_source_needs_preinvert(xo)
+                        )
                         cs_name = pikepdf.Name.DeviceCMYK
                     elif pil_img.mode in ("L", "1"):
                         if pil_img.mode == "1":
                             pil_img = pil_img.convert("L")
+                        buf = io.BytesIO()
                         pil_img.save(buf, format="JPEG", quality=95)
+                        jpeg_bytes = buf.getvalue()
                         cs_name = pikepdf.Name.DeviceGray
                     else:
                         pil_img = pil_img.convert("RGB")
+                        buf = io.BytesIO()
                         pil_img.save(buf, format="JPEG", quality=95)
+                        jpeg_bytes = buf.getvalue()
                         cs_name = pikepdf.Name.DeviceRGB
 
-                    buf.seek(0)
-                    new_stream = pikepdf.Stream(pdf, buf.read())
+                    new_stream = pikepdf.Stream(pdf, jpeg_bytes)
                     new_stream["/Type"] = pikepdf.Name.XObject
                     new_stream["/Subtype"] = pikepdf.Name.Image
                     new_stream["/Width"] = new_width
@@ -266,11 +328,17 @@ def _convert_image_xobject(
 
     pil_img = pil_img.convert(target_mode)
 
-    buf = io.BytesIO()
-    pil_img.save(buf, format="JPEG", quality=95)
-    buf.seek(0)
+    if target_mode == "CMYK":
+        # The source's PIL CMYK may be in PDF convention (Indexed-CMYK source
+        # decoded by pikepdf) or PIL convention (everything else). Detect from
+        # the source filter so we pre-invert only when needed.
+        jpeg_bytes = _save_cmyk_jpeg(pil_img, pre_invert=_cmyk_source_needs_preinvert(xo))
+    else:
+        buf = io.BytesIO()
+        pil_img.save(buf, format="JPEG", quality=95)
+        jpeg_bytes = buf.getvalue()
 
-    new_stream = pikepdf.Stream(pdf, buf.read())
+    new_stream = pikepdf.Stream(pdf, jpeg_bytes)
     new_stream["/Type"] = pikepdf.Name.XObject
     new_stream["/Subtype"] = pikepdf.Name.Image
     new_stream["/Width"] = width
