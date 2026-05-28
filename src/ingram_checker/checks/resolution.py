@@ -24,14 +24,23 @@ def _format_position(img: ImageInfo) -> str:
 
 
 def _format_image(img: ImageInfo) -> str:
-    max_dpi = max(img.effective_dpi_x, img.effective_dpi_y)
+    dpi_x = img.effective_dpi_x
+    dpi_y = img.effective_dpi_y
+    larger = max(dpi_x, dpi_y)
+    # Surface both axes when the image is non-uniformly scaled, since the
+    # check fails on min(dpi_x, dpi_y) and reporting only the higher value
+    # would hide which axis is the offender.
+    if larger > 0 and abs(dpi_x - dpi_y) / larger > 0.02:
+        dpi_str = f"{dpi_x:.0f}×{dpi_y:.0f}ppi"
+    else:
+        dpi_str = f"{larger:.0f}ppi"
     pos = _format_position(img)
     display_w = (img.position[2] - img.position[0]) / 72 if img.position else 0
     display_h = (img.position[3] - img.position[1]) / 72 if img.position else 0
     size_str = f'{display_w:.2f}x{display_h:.2f}"' if img.position else ""
     return (
         f"  Page {img.page}: {img.width_px}x{img.height_px}px "
-        f"at {max_dpi:.0f}ppi, displayed {size_str}{pos}"
+        f"at {dpi_str}, displayed {size_str}{pos}"
     )
 
 
