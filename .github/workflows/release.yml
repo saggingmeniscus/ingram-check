@@ -76,7 +76,7 @@ jobs:
           - target: macos-arm64
             runner: macos-14
           - target: macos-x86_64
-            runner: macos-13
+            runner: macos-15-intel
           - target: linux-x86_64
             runner: ubuntu-latest
           - target: linux-arm64
@@ -136,6 +136,10 @@ jobs:
           name: python-packages
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Idempotent: a re-run of an already-published version is a no-op
+          # rather than a hard failure (PyPI rejects duplicate uploads).
+          skip-existing: true
 
   # ---------- homebrew ----------
   # Regenerate the multi-platform binary formula. Runs after `release` so the
