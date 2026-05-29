@@ -63,19 +63,35 @@ jobs:
           fi
 
   # ---------- build ----------
+  # One self-contained PyInstaller bundle per platform Homebrew supports.
+  # PyInstaller can't cross-compile, so each target builds on a native runner.
+  # The asset name (ingram-check-<target>.tar.gz) is the contract the Homebrew
+  # generator (scripts/update_homebrew_formula.py) relies on.
   build-binary:
     needs: [lint, test, version]
-    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: macos-arm64
+            runner: macos-14
+          - target: macos-x86_64
+            runner: macos-13
+          - target: linux-x86_64
+            runner: ubuntu-latest
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
       - run: uv sync --group dev
       - run: make build
-      - run: tar -czf ingram-check-macos-arm64.tar.gz -C dist ingram-check
+      - run: tar -czf "ingram-check-${{ matrix.target }}.tar.gz" -C dist ingram-check
       - uses: actions/upload-artifact@v4
         with:
-          name: binary-macos-arm64
-          path: ingram-check-macos-arm64.tar.gz
+          name: binary-${{ matrix.target }}
+          path: ingram-check-${{ matrix.target }}.tar.gz
 
   build-sdist:
     needs: [lint, test, version]
@@ -96,8 +112,9 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: binary-macos-arm64
+          pattern: binary-*
           path: artifacts/
+          merge-multiple: true
       - uses: actions/download-artifact@v4
         with:
           name: python-packages
@@ -121,63 +138,54 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
 
   # ---------- homebrew ----------
+  # Regenerate the multi-platform binary formula. Runs after `release` so the
+  # asset download URLs the formula points at are live. The sha256 for each
+  # platform is computed from the build artifacts (not by re-downloading the
+  # release asset), which avoids racing against GitHub/CDN propagation.
   update-homebrew:
-    needs: [publish-pypi, version]
+    needs: [release, version]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          path: source
       - uses: actions/checkout@v4
         with:
           repository: saggingmeniscus/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
-      - name: Update formula
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          path: bins/
+          merge-multiple: true
+      - name: Generate formula
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
-          # Pull the authoritative sha256 from PyPI's JSON API rather than
-          # downloading the sdist and hashing it ourselves: the JSON value is
-          # what PyPI itself records and avoids the silent-failure mode where
-          # `curl -sSL` against an un-propagated /source/ URL writes zero
-          # bytes and hashes to e3b0c44... (the empty-string SHA-256).
-          API="https://pypi.org/pypi/ingram-checker/${VERSION}/json"
-
-          # Poll up to ~5 minutes for PyPI to make the release visible.
-          SHA256=""
-          for attempt in $(seq 1 30); do
-            JSON=$(curl -fsSL "$API" || true)
-            if [ -n "$JSON" ]; then
-              SHA256=$(printf '%s' "$JSON" | python3 -c "
-          import json, sys
-          data = json.load(sys.stdin)
-          for f in data.get('urls', []):
-              if f.get('packagetype') == 'sdist':
-                  print(f['digests']['sha256'])
-                  break
-          ")
+          args=()
+          for target in macos-arm64 macos-x86_64 linux-x86_64 linux-arm64; do
+            tarball="bins/ingram-check-${target}.tar.gz"
+            if [ ! -f "$tarball" ]; then
+              echo "::error::missing build artifact $tarball"
+              exit 1
             fi
-            if [ -n "$SHA256" ]; then
-              echo "Got sdist sha256 on attempt $attempt: $SHA256"
-              break
-            fi
-            echo "PyPI not ready (attempt $attempt), retrying in 10s..."
-            sleep 10
+            sha=$(sha256sum "$tarball" | cut -d' ' -f1)
+            args+=(--sha "${target}=${sha}")
           done
-
-          if [ -z "$SHA256" ] || [ "$SHA256" = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" ]; then
-            echo "::error::Failed to retrieve a valid sdist sha256 from PyPI for ${VERSION}"
-            exit 1
-          fi
-
-          URL="https://files.pythonhosted.org/packages/source/i/ingram-checker/ingram_checker-${VERSION}.tar.gz"
+          python3 source/scripts/update_homebrew_formula.py \
+            --version "$VERSION" \
+            --formula homebrew-tap/Formula/ingram-check.rb \
+            "${args[@]}"
+      - name: Commit and push
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
           cd homebrew-tap
-          FORMULA="Formula/ingram-check.rb"
-
-          sed -i "s|url \".*\"|url \"${URL}\"|" "$FORMULA"
-          sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|" "$FORMULA"
-
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "$FORMULA"
+          git add Formula/ingram-check.rb
           git diff --cached --quiet || git commit -m "ingram-check ${VERSION}"
           git push

@@ -9,12 +9,15 @@ A command-line tool that checks PDF files for [Ingram Lightning Source](https://
 
 ## Installation
 
-### Homebrew (macOS)
+### Homebrew (macOS & Linux)
 
 ```bash
 brew tap saggingmeniscus/tap
 brew install ingram-check
 ```
+
+Installs a self-contained binary — no separate Python required. Supports
+macOS (Apple Silicon and Intel) and Linux (x86_64 and arm64), including WSL.
 
 ### PyPI
 
@@ -24,9 +27,9 @@ pip install ingram-checker
 uv tool install ingram-checker
 ```
 
-### Standalone binary (macOS Apple Silicon)
+### Standalone binary
 
-Download `ingram-check-macos-arm64.tar.gz` from the [latest release](https://github.com/saggingmeniscus/ingram-check/releases/latest), extract it, and run `./ingram-check` from the extracted directory. No Python installation required.
+Download the tarball for your platform from the [latest release](https://github.com/saggingmeniscus/ingram-check/releases/latest) — `ingram-check-macos-arm64`, `ingram-check-macos-x86_64`, `ingram-check-linux-x86_64`, or `ingram-check-linux-arm64` — extract it, and run `./ingram-check/ingram-check`. No Python installation required.
 
 ### From source
 
