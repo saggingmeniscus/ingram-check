@@ -70,8 +70,12 @@ class ResolutionCheck(BaseCheck):
         warn_high_images: list[str] = []
 
         for img in images:
-            min_dpi = min(img.effective_dpi_x, img.effective_dpi_y)
-            max_dpi = max(img.effective_dpi_x, img.effective_dpi_y)
+            # Round to integers before comparing — thresholds are whole ppi
+            # and the displayed "Xppi" values are rounded too, so without
+            # this an image at 299.97 ppi (a common artifact of integer-pixel
+            # resampling targeting 300 ppi) would warn while reading "300ppi".
+            min_dpi = round(min(img.effective_dpi_x, img.effective_dpi_y))
+            max_dpi = round(max(img.effective_dpi_x, img.effective_dpi_y))
             if min_dpi < error_threshold:
                 error_images.append(_format_image(img))
             elif min_dpi < RESOLUTION_WARN_LOW:

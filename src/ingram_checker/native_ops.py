@@ -14,6 +14,7 @@ import numpy as np
 import pikepdf
 from PIL import Image
 
+from .config import RESOLUTION_WARN_HIGH
 from .ghostscript import InkCoverage
 
 # Keys that describe masking/rendering and are orthogonal to color space and sampling.
@@ -183,16 +184,37 @@ def resample_images(
     Uses PyMuPDF to get accurate display dimensions for DPI calculation,
     then pikepdf to replace image XObjects with resampled versions.
     """
-    # Phase 1: Build a map of (page_index, xobj_name) -> effective DPI using PyMuPDF
+    # Phase 1: Build (page, name) -> per-pixel-axis display extents in points.
+    #
+    # Using the content-stream transform matrix (a b c d e f) rather than the
+    # axis-aligned bounding box: for a rotated image the bbox swaps width
+    # and height, but the column-vector magnitudes ‖(a,b)‖ and ‖(c,d)‖ tell
+    # us how many points the image's pixel-W and pixel-H axes actually span
+    # on the page. Without this, a 720x130 px image rotated 90° onto a
+    # 2.0"x0.36" spine reads as 18/2000 ppi instead of its true 360 ppi.
     doc = fitz.open(str(input_path))
-    # Map (page_0idx, image_name) -> (dpi_x, dpi_y)
-    image_dpi: dict[tuple[int, str], tuple[float, float]] = {}
+    image_extent: dict[tuple[int, str], tuple[int, int, float, float]] = {}
     try:
         for page_num in range(len(doc)):
             page = doc[page_num]
+            # xref -> (extent_w_pts, extent_h_pts) for this page's draws.
+            xref_to_extent: dict[int, tuple[float, float]] = {}
+            for info in page.get_image_info(xrefs=True):
+                xref = info.get("xref", 0)
+                tr = info.get("transform")
+                if not xref or not tr or len(tr) < 4:
+                    continue
+                a, b, c, d = tr[0], tr[1], tr[2], tr[3]
+                ext_w_pts = (a * a + b * b) ** 0.5
+                ext_h_pts = (c * c + d * d) ** 0.5
+                if ext_w_pts > 0 and ext_h_pts > 0:
+                    xref_to_extent[xref] = (ext_w_pts, ext_h_pts)
+
             for img in page.get_images(full=True):
                 xref = img[0]
                 img_name = img[7] if len(img) > 7 else ""
+                if not img_name or xref not in xref_to_extent:
+                    continue
                 try:
                     img_info = doc.extract_image(xref)
                     if img_info is None:
@@ -201,18 +223,13 @@ def resample_images(
                     pix_h = img_info.get("height", 0)
                     if pix_w == 0 or pix_h == 0:
                         continue
-                    rects = page.get_image_rects(img[7] if len(img) > 7 else xref)
-                    if not rects:
-                        continue
-                    rect = rects[0]
-                    if rect.is_empty or rect.is_infinite:
-                        continue
-                    disp_w = rect.width / 72.0
-                    disp_h = rect.height / 72.0
-                    dpi_x = pix_w / disp_w if disp_w > 0 else 0
-                    dpi_y = pix_h / disp_h if disp_h > 0 else 0
-                    if img_name:
-                        image_dpi[(page_num, img_name)] = (dpi_x, dpi_y)
+                    ext_w_pts, ext_h_pts = xref_to_extent[xref]
+                    image_extent[(page_num, img_name)] = (
+                        pix_w,
+                        pix_h,
+                        ext_w_pts,
+                        ext_h_pts,
+                    )
                 except Exception:
                     continue
     finally:
@@ -239,25 +256,31 @@ def resample_images(
                     if width == 0 or height == 0:
                         continue
 
-                    # Look up DPI. The pikepdf name has a leading /
+                    # Look up extent. The pikepdf name has a leading /
                     clean_name = str(xo_name).lstrip("/")
-                    dpi_info = image_dpi.get((page_idx, clean_name))
-                    if dpi_info is None:
+                    extent = image_extent.get((page_idx, clean_name))
+                    if extent is None:
                         continue
 
-                    dpi_x, dpi_y = dpi_info
-                    if dpi_x <= 0 or dpi_y <= 0:
+                    _, _, ext_w_pts, ext_h_pts = extent
+                    if ext_w_pts <= 0 or ext_h_pts <= 0:
                         continue
-                    # Skip only when both axes are already close enough — must
-                    # not gate on min() alone, as a non-uniformly scaled image
-                    # can have one offending axis while the other is fine.
-                    if abs(dpi_x - target_dpi) < 10 and abs(dpi_y - target_dpi) < 10:
+                    dpi_x = width * 72.0 / ext_w_pts
+                    dpi_y = height * 72.0 / ext_h_pts
+                    # Skip when both axes are already inside the acceptable
+                    # band [target_dpi-10, RESOLUTION_WARN_HIGH]. Above the
+                    # band, downsampling saves file size; below, we must
+                    # upsample to meet the minimum.
+                    if (target_dpi - 10) <= dpi_x <= RESOLUTION_WARN_HIGH and (
+                        target_dpi - 10
+                    ) <= dpi_y <= RESOLUTION_WARN_HIGH:
                         continue
 
-                    # Per-axis target: matching the displayed size at target_dpi.
-                    # Avoids bloating the over-resolution axis of a stretched image.
-                    new_width = max(1, round(width * target_dpi / dpi_x))
-                    new_height = max(1, round(height * target_dpi / dpi_y))
+                    # Per-pixel-axis target: enough pixels to hit target_dpi
+                    # along the *true* display extent of each pixel axis
+                    # (transform-derived, so rotation is handled correctly).
+                    new_width = max(1, round(target_dpi * ext_w_pts / 72.0))
+                    new_height = max(1, round(target_dpi * ext_h_pts / 72.0))
 
                     pil_img = pikepdf.PdfImage(xo).as_pil_image()
                     pil_img = pil_img.resize((new_width, new_height), Image.LANCZOS)

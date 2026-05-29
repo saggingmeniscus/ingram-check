@@ -347,6 +347,90 @@ def _render_first_image_mean_rgb(pdf_path: Path) -> tuple[int, int, int]:
     return avg
 
 
+def _make_pdf_with_rotated_cmyk_image(
+    tmp_path: Path,
+    img_size: tuple[int, int] = (720, 130),
+    # cm transform applied to image XObject. Defaults rotate the image 90°
+    # and place it so the long pixel axis spans 2.0" (144 pt) vertically and
+    # the short pixel axis spans 0.36" (26 pt) horizontally.
+    transform: tuple[float, float, float, float, float, float] = (
+        0.0,
+        144.0,
+        -26.0,
+        0.0,
+        100.0,
+        100.0,
+    ),
+    filename: str = "rotated.pdf",
+) -> Path:
+    """Helper: create a PDF where the only image is drawn with an arbitrary
+    affine transform (rotation/scale)."""
+    import io
+
+    from PIL import Image
+
+    w, h = img_size
+    img = Image.new("CMYK", (w, h), color=(100, 50, 25, 10))
+    img_bytes = io.BytesIO()
+    img.save(img_bytes, format="JPEG", quality=95)
+    img_bytes.seek(0)
+
+    pdf_path = tmp_path / filename
+    pdf = pikepdf.Pdf.new()
+    pdf.add_blank_page(page_size=(6 * 72, 9 * 72))
+    page = pdf.pages[0]
+
+    raw_img = pikepdf.Stream(pdf, img_bytes.read())
+    raw_img["/Type"] = pikepdf.Name.XObject
+    raw_img["/Subtype"] = pikepdf.Name.Image
+    raw_img["/Width"] = w
+    raw_img["/Height"] = h
+    raw_img["/ColorSpace"] = pikepdf.Name.DeviceCMYK
+    raw_img["/BitsPerComponent"] = 8
+    raw_img["/Filter"] = pikepdf.Name.DCTDecode
+
+    page.Resources = pikepdf.Dictionary(XObject=pikepdf.Dictionary({"/Im0": raw_img}))
+    a, b, c, d, e, f = transform
+    page.Contents = pikepdf.Stream(pdf, f"q {a} {b} {c} {d} {e} {f} cm /Im0 Do Q".encode())
+    pdf.save(pdf_path)
+    return pdf_path
+
+
+def test_resample_does_not_touch_rotated_image_already_at_target_dpi(tmp_path: Path):
+    """Images rotated on the page must have DPI computed from the transform
+    matrix, not the axis-aligned bounding box. A 720x130 px image rotated 90°
+    so its long axis spans 2.0" (144 pt) and short axis spans 0.36" (26 pt)
+    is actually at 360 ppi in both directions — well above the 300 target.
+    The bbox-based calculation incorrectly sees it as 65/2000 ppi and resamples
+    catastrophically (destroying the actual resolution)."""
+    pdf_path = _make_pdf_with_rotated_cmyk_image(tmp_path)
+    output_path = tmp_path / "resampled.pdf"
+    resample_images(pdf_path, output_path, target_dpi=300)
+
+    # Output pixel dimensions should match source (no resampling occurred).
+    assert _first_image_dims(output_path) == (720, 130)
+
+
+def test_resample_low_dpi_rotated_image_gets_correct_target_dimensions(tmp_path: Path):
+    """A rotated image that DOES need upsampling must compute target dimensions
+    from the transform extents, not the bbox. 100x200 px rotated 90° onto a
+    2.0"x1.0" area means pixel-W spans 2.0" (50 ppi) and pixel-H spans 1.0"
+    (200 ppi). Resampling to 300 dpi should yield 600 px (pixel-W: 2.0×300)
+    by 300 px (pixel-H: 1.0×300), NOT 300×600 (which is what bbox-blind
+    code produces by mixing up the axes)."""
+    # 100 wide × 200 tall pixels; rotated 90° so pixel-W spans 144 pt = 2.0",
+    # pixel-H spans 72 pt = 1.0".
+    pdf_path = _make_pdf_with_rotated_cmyk_image(
+        tmp_path,
+        img_size=(100, 200),
+        transform=(0.0, 144.0, -72.0, 0.0, 100.0, 100.0),
+    )
+    output_path = tmp_path / "resampled.pdf"
+    resample_images(pdf_path, output_path, target_dpi=300)
+
+    assert _first_image_dims(output_path) == (600, 300)
+
+
 def test_resample_indexed_cmyk_preserves_color(tmp_path: Path):
     """Indexed CMYK source images must render the same color after resampling.
 

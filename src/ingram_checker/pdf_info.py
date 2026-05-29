@@ -285,56 +285,64 @@ def _extract_color_spaces_from_page(
 
 
 def get_images(pdf_path: str | Path) -> list[ImageInfo]:
-    """Extract image information including effective DPI using PyMuPDF."""
+    """Extract image information including effective DPI using PyMuPDF.
+
+    effective_dpi_x/y are computed per *pixel axis* using the content-stream
+    transformation matrix's column-vector magnitudes — so a 90°-rotated image
+    is correctly assessed (the pixel-W axis spans the display extent it's
+    actually mapped to, not the axis-aligned bbox width).
+    """
     results: list[ImageInfo] = []
     doc = fitz.open(str(pdf_path))
     try:
         for page_num in range(len(doc)):
             page = doc[page_num]
-            image_list = page.get_images(full=True)
-            for img_index, img in enumerate(image_list):
-                xref = img[0]
+            for info in page.get_image_info(xrefs=True):
                 try:
-                    img_info = doc.extract_image(xref)
-                    if img_info is None:
+                    xref = info.get("xref", 0)
+                    if not xref:
+                        continue
+                    pix_width = info.get("width", 0)
+                    pix_height = info.get("height", 0)
+                    if pix_width == 0 or pix_height == 0:
                         continue
 
-                    pix_width = img_info.get("width", 0)
-                    pix_height = img_info.get("height", 0)
-                    cs_name = img_info.get("colorspace", 0)
-                    bpc = img_info.get("bpc", 8)
-
-                    # Get the image's display dimensions on the page via transforms
-                    img_rects = page.get_image_rects(img[7] if len(img) > 7 else xref)
-                    if not img_rects:
+                    tr = info.get("transform")
+                    if not tr or len(tr) < 4:
+                        continue
+                    a, b, c, d = tr[0], tr[1], tr[2], tr[3]
+                    ext_w_pts = (a * a + b * b) ** 0.5
+                    ext_h_pts = (c * c + d * d) ** 0.5
+                    if ext_w_pts <= 0 or ext_h_pts <= 0:
                         continue
 
-                    for rect in img_rects:
-                        if rect.is_empty or rect.is_infinite:
-                            continue
-                        display_width_in = rect.width / 72.0
-                        display_height_in = rect.height / 72.0
+                    dpi_x = pix_width * 72.0 / ext_w_pts
+                    dpi_y = pix_height * 72.0 / ext_h_pts
 
-                        dpi_x = pix_width / display_width_in if display_width_in > 0 else 0
-                        dpi_y = pix_height / display_height_in if display_height_in > 0 else 0
+                    cs_name = info.get("cs-name") or info.get("colorspace", 0)
+                    if isinstance(cs_name, int):
+                        cs_map = {1: "DeviceGray", 3: "DeviceRGB", 4: "DeviceCMYK"}
+                        cs_name = cs_map.get(cs_name, f"Unknown({cs_name})")
+                    bpc = info.get("bpc", 8)
 
-                        # Map colorspace number to name
-                        if isinstance(cs_name, int):
-                            cs_map = {1: "DeviceGray", 3: "DeviceRGB", 4: "DeviceCMYK"}
-                            cs_name = cs_map.get(cs_name, f"Unknown({cs_name})")
+                    bbox = info.get("bbox")
+                    if bbox and len(bbox) == 4:
+                        position = (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3]))
+                    else:
+                        position = None
 
-                        results.append(
-                            ImageInfo(
-                                page=page_num + 1,
-                                width_px=pix_width,
-                                height_px=pix_height,
-                                effective_dpi_x=dpi_x,
-                                effective_dpi_y=dpi_y,
-                                color_space=cs_name,
-                                bits_per_component=bpc,
-                                position=(rect.x0, rect.y0, rect.x1, rect.y1),
-                            )
+                    results.append(
+                        ImageInfo(
+                            page=page_num + 1,
+                            width_px=pix_width,
+                            height_px=pix_height,
+                            effective_dpi_x=dpi_x,
+                            effective_dpi_y=dpi_y,
+                            color_space=cs_name,
+                            bits_per_component=bpc,
+                            position=position,
                         )
+                    )
                 except Exception:
                     continue
     finally:
