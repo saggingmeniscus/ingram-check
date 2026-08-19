@@ -457,3 +457,111 @@ def test_resample_indexed_cmyk_preserves_color(tmp_path: Path):
     # Allow some JPEG quantization slack.
     for s, o, ch in zip(src_rgb, out_rgb, "RGB", strict=True):
         assert abs(s - o) <= 5, f"channel {ch} drifted from source: src={src_rgb} out={out_rgb}"
+
+
+def _make_pdf_with_adobe_cmyk_jpeg(
+    tmp_path: Path,
+    ink_cmyk: tuple[int, int, int, int] = (10, 8, 8, 20),
+    filename: str = "adobe_cmyk.pdf",
+    img_size: tuple[int, int] = (100, 100),
+    display_pts: tuple[float, float] = (72.0, 72.0),
+) -> Path:
+    """Helper: PDF with a DCTDecode CMYK image and NO /Decode array.
+
+    This is the shape Adobe InDesign writes: the JPEG carries an APP14 marker
+    but the samples are stored in plain PDF convention (0=no ink) with no
+    /Decode array, so renderers read them as-is. `ink_cmyk` is the ink the page
+    should actually render, in PDF convention.
+
+    Pillow's JPEG writer inverts CMYK on save, so we hand it 255-ink to get
+    `ink` on disk.
+    """
+    import io
+
+    from PIL import Image
+
+    w, h = img_size
+    img = Image.new("CMYK", (w, h), color=tuple(255 - v for v in ink_cmyk))
+    img_bytes = io.BytesIO()
+    img.save(img_bytes, format="JPEG", quality=95)
+    img_bytes.seek(0)
+
+    pdf_path = tmp_path / filename
+    pdf = pikepdf.Pdf.new()
+    pdf.add_blank_page(page_size=(6 * 72, 9 * 72))
+    page = pdf.pages[0]
+
+    raw_img = pikepdf.Stream(pdf, img_bytes.read())
+    raw_img["/Type"] = pikepdf.Name.XObject
+    raw_img["/Subtype"] = pikepdf.Name.Image
+    raw_img["/Width"] = w
+    raw_img["/Height"] = h
+    raw_img["/ColorSpace"] = pikepdf.Name.DeviceCMYK
+    raw_img["/BitsPerComponent"] = 8
+    raw_img["/Filter"] = pikepdf.Name.DCTDecode
+
+    page.Resources = pikepdf.Dictionary(XObject=pikepdf.Dictionary({"/Im0": raw_img}))
+    dw, dh = display_pts
+    page.Contents = pikepdf.Stream(pdf, f"q {dw} 0 0 {dh} 0 0 cm /Im0 Do Q".encode())
+    pdf.save(pdf_path)
+    return pdf_path
+
+
+def test_grayscale_conversion_of_adobe_cmyk_jpeg_is_not_inverted(tmp_path: Path):
+    """Converting a DCTDecode CMYK image to grayscale must not produce a negative.
+
+    Pillow's JPEG codec inverts CMYK samples on read. For a CMYK JPEG stored in
+    plain PDF convention (no /Decode array), that leaves the in-memory PIL image
+    as a photographic negative of what the page renders. Resampling hides this
+    because Pillow's save inverts right back, but `.convert("L")` reads those
+    inverted values directly — turning a light image black.
+    """
+    pdf_path = _make_pdf_with_adobe_cmyk_jpeg(tmp_path, ink_cmyk=(10, 8, 8, 20))
+    output_path = tmp_path / "gray.pdf"
+    convert_to_grayscale(pdf_path, output_path)
+
+    src_rgb = _render_first_image_mean_rgb(pdf_path)
+    out_rgb = _render_first_image_mean_rgb(output_path)
+    src_lum = sum(src_rgb) / 3
+    out_lum = sum(out_rgb) / 3
+    assert abs(src_lum - out_lum) <= 8, (
+        f"grayscale output inverted: source luminance {src_lum:.0f}, output {out_lum:.0f}"
+    )
+
+
+def test_rgb_to_cmyk_conversion_preserves_color(tmp_path: Path):
+    """RGB -> CMYK conversion must not invert the image.
+
+    Pillow's JPEG writer inverts CMYK on save, so the converted samples have to
+    be pre-inverted no matter what the source encoding was.
+
+    The tolerance is loose because a naive RGB->CMYK round trip loses real
+    accuracy on saturated primaries. It is still tight enough to catch an
+    inversion, which turns the fixture's red into cyan -- a drift of ~250 per
+    channel.
+    """
+    pdf_path = _make_pdf_with_rgb_image(tmp_path)
+    output_path = tmp_path / "cmyk.pdf"
+    convert_to_cmyk(pdf_path, output_path)
+
+    src_rgb = _render_first_image_mean_rgb(pdf_path)
+    out_rgb = _render_first_image_mean_rgb(output_path)
+    for s, o, ch in zip(src_rgb, out_rgb, "RGB", strict=True):
+        assert abs(s - o) <= 40, f"channel {ch} drifted from source: src={src_rgb} out={out_rgb}"
+
+
+def test_resample_cmyk_with_decode_array_preserves_color(tmp_path: Path):
+    """A DCT CMYK source carrying /Decode [1 0 ...] must survive resampling.
+
+    The replacement stream carries no /Decode array, so the samples we write
+    must already be in plain PDF convention rather than the source's inverted
+    storage.
+    """
+    pdf_path = _make_pdf_with_cmyk_image(tmp_path, img_size=(100, 100), display_pts=(72, 72))
+    output_path = tmp_path / "resampled.pdf"
+    resample_images(pdf_path, output_path, target_dpi=300)
+
+    src_rgb = _render_first_image_mean_rgb(pdf_path)
+    out_rgb = _render_first_image_mean_rgb(output_path)
+    for s, o, ch in zip(src_rgb, out_rgb, "RGB", strict=True):
+        assert abs(s - o) <= 12, f"channel {ch} drifted from source: src={src_rgb} out={out_rgb}"

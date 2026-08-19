@@ -46,37 +46,66 @@ def _strip_jpeg_app14(data: bytes) -> bytes:
     return data[:i] + data[i + 2 + seg_len :]
 
 
-def _cmyk_source_needs_preinvert(xo: pikepdf.Object) -> bool:
-    """Return True if pikepdf hands PIL CMYK values in PDF convention (0=no ink).
-
-    Pillow stores CMYK in RGB-like convention (0=full ink). When the source
-    is a CMYK JPEG (DCTDecode), libjpeg+Pillow auto-invert during read so
-    PIL ends up with values in PIL convention and a round-trip through
-    PIL's JPEG writer produces correctly-encoded PDF bytes. But when the
-    source is an Indexed palette or raw FlateDecode CMYK, pikepdf returns
-    the raw PDF-convention bytes unchanged — PIL then treats them as
-    PIL-convention and Pillow's invert-on-save lands them upside-down,
-    producing color-inverted output. For those sources we must pre-invert
-    the PIL values before passing them to the JPEG writer.
-    """
+def _source_is_dct(xo: pikepdf.Object) -> bool:
+    """Return True if the image XObject's sample data is JPEG (DCTDecode)."""
     filt = xo.get("/Filter")
     if filt is None:
-        return True
+        return False
     if isinstance(filt, pikepdf.Name):
-        return str(filt) != "/DCTDecode"
+        return str(filt) == "/DCTDecode"
     if isinstance(filt, pikepdf.Array):
-        return not any(isinstance(f, pikepdf.Name) and str(f) == "/DCTDecode" for f in filt)
-    return True
+        return any(isinstance(f, pikepdf.Name) and str(f) == "/DCTDecode" for f in filt)
+    return False
 
 
-def _save_cmyk_jpeg(pil_img: Image.Image, pre_invert: bool = False, quality: int = 95) -> bytes:
+def _has_inverting_decode(xo: pikepdf.Object) -> bool:
+    """Return True for a /Decode array that inverts samples, e.g. [1 0 1 0 1 0 1 0]."""
+    decode = xo.get("/Decode")
+    if not isinstance(decode, pikepdf.Array) or len(decode) < 2:
+        return False
+    return float(decode[0]) > float(decode[1])
+
+
+def _cmyk_load_is_inverted(xo: pikepdf.Object) -> bool:
+    """Return True if as_pil_image() hands back CMYK values inverted vs PIL's convention.
+
+    Both PDF DeviceCMYK and Pillow's in-memory CMYK use 0=no ink, so the two
+    agree by default. Two independent things can flip the sense:
+
+    * Pillow's JPEG codec always inverts CMYK samples on read (and on write),
+      following the Adobe convention -- regardless of whether the JPEG carries
+      an APP14 marker. So a DCTDecode source arrives inverted.
+    * A /Decode [1 0 ...] array means the PDF itself inverts the stored samples.
+      pikepdf does not apply /Decode when handing the JPEG to Pillow, so this
+      flips the sense back.
+
+    The two cancel, hence XOR. Non-DCT sources (raw FlateDecode CMYK, Indexed
+    palettes) reach Pillow byte-for-byte, so only /Decode matters for them.
+    """
+    return _source_is_dct(xo) != _has_inverting_decode(xo)
+
+
+def _load_cmyk_in_pil_convention(xo: pikepdf.Object) -> Image.Image:
+    """Decode a CMYK image XObject into a PIL image with 0=no ink.
+
+    Any in-memory operation that interprets pixel values -- most importantly
+    .convert("L") -- needs the values the page actually renders, not whatever
+    convention the source encoding happened to use.
+    """
+    pil_img = pikepdf.PdfImage(xo).as_pil_image()
+    if pil_img.mode == "CMYK" and _cmyk_load_is_inverted(xo):
+        pil_img = Image.eval(pil_img, lambda v: 255 - v)
+    return pil_img
+
+
+def _save_cmyk_jpeg(pil_img: Image.Image, quality: int = 95) -> bytes:
     """Encode a CMYK PIL image as JPEG bytes safe for PDF embedding.
 
-    pre_invert: True when PIL holds PDF-convention CMYK values (from a non-DCT
-    source). See _cmyk_source_needs_preinvert for the convention details.
+    `pil_img` must hold PIL-convention values (0=no ink). Pillow's JPEG writer
+    inverts CMYK on save, and the streams we emit carry no /Decode array, so we
+    pre-invert to land plain PDF-convention samples on disk.
     """
-    if pre_invert:
-        pil_img = Image.eval(pil_img, lambda v: 255 - v)
+    pil_img = Image.eval(pil_img, lambda v: 255 - v)
     buf = io.BytesIO()
     pil_img.save(buf, format="JPEG", quality=quality)
     return _strip_jpeg_app14(buf.getvalue())
@@ -282,13 +311,11 @@ def resample_images(
                     new_width = max(1, round(target_dpi * ext_w_pts / 72.0))
                     new_height = max(1, round(target_dpi * ext_h_pts / 72.0))
 
-                    pil_img = pikepdf.PdfImage(xo).as_pil_image()
+                    pil_img = _load_cmyk_in_pil_convention(xo)
                     pil_img = pil_img.resize((new_width, new_height), Image.LANCZOS)
 
                     if pil_img.mode == "CMYK":
-                        jpeg_bytes = _save_cmyk_jpeg(
-                            pil_img, pre_invert=_cmyk_source_needs_preinvert(xo)
-                        )
+                        jpeg_bytes = _save_cmyk_jpeg(pil_img)
                         cs_name = pikepdf.Name.DeviceCMYK
                     elif pil_img.mode in ("L", "1"):
                         if pil_img.mode == "1":
@@ -345,17 +372,14 @@ def _convert_image_xobject(
         return None
 
     try:
-        pil_img = pikepdf.PdfImage(xo).as_pil_image()
+        pil_img = _load_cmyk_in_pil_convention(xo)
     except Exception:
         return None
 
     pil_img = pil_img.convert(target_mode)
 
     if target_mode == "CMYK":
-        # The source's PIL CMYK may be in PDF convention (Indexed-CMYK source
-        # decoded by pikepdf) or PIL convention (everything else). Detect from
-        # the source filter so we pre-invert only when needed.
-        jpeg_bytes = _save_cmyk_jpeg(pil_img, pre_invert=_cmyk_source_needs_preinvert(xo))
+        jpeg_bytes = _save_cmyk_jpeg(pil_img)
     else:
         buf = io.BytesIO()
         pil_img.save(buf, format="JPEG", quality=95)
